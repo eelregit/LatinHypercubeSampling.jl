@@ -4,6 +4,7 @@ export  randomLHC,
         scaleLHC,
         AudzeEglaisObjective,
         AudzeEglaisObjective!,
+        MinDistObjective,
         LHCoptim,
         LHCoptim!,
         subLHCoptim,
@@ -30,6 +31,7 @@ Categorical(x) = Categorical(x,0.0)
 
 include("GA.jl")
 include("AudzeEglaisObjective.jl")
+include("MinDistObjective.jl")
 
 
 function randperm(dim::Continuous,n)
@@ -45,7 +47,7 @@ function randperm(dim::Categorical,n)
         e = round(Int,i*n/lvls)
         out[s:e] .= i
     end
-    shuffle!(out)    
+    shuffle!(out)
 end
 
 """
@@ -73,9 +75,9 @@ julia> scaleLHC(plan,[(-1,1),(10,100)])
 ```
 """
 function scaleLHC(LHC::Array{T,2},scale_range::Array{Tuple{U,V},1}) where V where U where T
-    
+
     scaledLHC = Array{Float64,2}(undef,size(LHC))
-    
+
     for i in 1:size(LHC,2)
         LHCcol = LHC[:,i]
         old_min, old_max = extrema(LHCcol)
@@ -93,7 +95,7 @@ Generate a random Latin Hypercube with `d` dimensions and `n` sample points.
 function randomLHC(n::Int,d::Int)
 
     dims = [Continuous() for i in 1:d]
-        
+
     return randomLHC(n,dims)
 
 end
@@ -112,7 +114,7 @@ end
 """
     function LHCoptim(n::Int,d::Int,gens; popsize::Int=100, ntour::Int=2, ptour=0.8)
 Produce an optimized Latin Hyper Cube with `d` dimensions and `n` sample points.
-Optimization is run for `gens` generations. Returns a tuple of the sample plan and 
+Optimization is run for `gens` generations. Returns a tuple of the sample plan and
 the optimization fitness history.
 """
 function LHCoptim(n::Int,d::Int,gens;   popsize::Int=100,
@@ -132,7 +134,7 @@ end
 """
     function LHCoptim!(X::Array{Int,2},n::Int,d::Int,gens;ntour::Int=2,ptour=0.8)
 Same as LHCoptim(n::Int,d::Int,gens;popsize::Int=100,ntour::Int=2,ptour=0.8) but using an
-existing population. Useful for continued optimization. Returns a tuple of the sample plan and 
+existing population. Useful for continued optimization. Returns a tuple of the sample plan and
 the optimization fitness history.
 """
 function LHCoptim!(X::Array{Int,2},gens;    popsize::Int=100,
@@ -145,7 +147,7 @@ function LHCoptim!(X::Array{Int,2},gens;    popsize::Int=100,
     n, d = size(X)                             #Num points, num dimensions
     mut_inds = Array{Int}(undef,2)             #Storage of indices to swap in mutation
     tour_inds = Array{Int}(undef,ntour)        #Storage of indices for tournament selection
-        
+
 
     #allocate first population
     pop = [randomLHC(n,dims) for i = 1:popsize]
@@ -175,7 +177,10 @@ function LHCoptim!(X::Array{Int,2},gens;    popsize::Int=100,
 
     #evaluate first populations fitness
     for i = 1:popsize
-        fitness[i] = AudzeEglaisObjective(pop[i];
+        #fitness[i] = AudzeEglaisObjective(pop[i];
+        #                                    interSampleWeight=interSampleWeight,
+        #                                    dims=dims)
+        fitness[i] = MinDistObjective(pop[i]; p=2,
                                             interSampleWeight=interSampleWeight,
                                             dims=dims)
     end
@@ -195,18 +200,18 @@ function LHCoptim!(X::Array{Int,2},gens;    popsize::Int=100,
 
         #tournament selection
         sortperm!(fitnessInds,fitness)
-        for i = 2:popsize            
+        for i = 2:popsize
             winnerInd = tournament!(fitnessInds,ntour,tour_inds,ptour)
             nextpop[i] = copy(pop[winnerInd])
         end
-        
+
         #create children from crossover
         for i = 2:2:popsize+popEven
             for j in continuousDims
                 if rand() < 1.0/length(continuousDims)
                     parone = nextpop[i]
                     partwo = nextpop[i+1]
-                    
+
                     fixedcross!(offsprone, offsprtwo, view(parone,:,j), view(partwo,:,j))
                     nextpop[i][:,j], nextpop[i+1][:,j] = offsprone, offsprtwo
                 end
@@ -229,7 +234,10 @@ function LHCoptim!(X::Array{Int,2},gens;    popsize::Int=100,
 
         #evaluate fitness
         for i = 1:popsize
-            fitness[i] = AudzeEglaisObjective(nextpop[i];
+            #fitness[i] = AudzeEglaisObjective(nextpop[i];
+            #                                    interSampleWeight=interSampleWeight,
+            #                                    dims=dims)
+            fitness[i] = MinDistObjective(nextpop[i]; p=2,
                                                 interSampleWeight=interSampleWeight,
                                                 dims=dims)
         end
@@ -278,7 +286,8 @@ function subLHCoptim(X,n::Int,gens;popsize::Int=100,ntour::Int=2,ptour=0.8)
     for i = 1:popsize+1
         subInds = sample(1:nLarge, n, replace = false)
         pop[i] = X[subInds,:]
-        fitness[i] = AudzeEglaisObjective(pop[i])
+        #fitness[i] = AudzeEglaisObjective(pop[i])
+        fitness[i] = MinDistObjective(pop[i], p=2)
     end
 
 
@@ -290,14 +299,14 @@ function subLHCoptim(X,n::Int,gens;popsize::Int=100,ntour::Int=2,ptour=0.8)
 
     #iterate for gens generations
     for k = 1:gens
-        
+
         #tournament selection
         sortperm!(fitnessInds,fitness)
         for i = 2:popsize+1
             winnerInd = tournament!(fitnessInds,ntour,tour_inds,ptour)
             nextpop[i] = copy(pop[winnerInd])
         end
-        
+
 
         #perform mutation
         for i = 2:popsize+1
@@ -314,14 +323,15 @@ function subLHCoptim(X,n::Int,gens;popsize::Int=100,ntour::Int=2,ptour=0.8)
 
         #evaluate fitness
         for i = 1:popsize+1
-            fitness[i] = AudzeEglaisObjective(nextpop[i])
+            #fitness[i] = AudzeEglaisObjective(nextpop[i])
+            fitness[i] = MinDistObjective(nextpop[i], p=2)
         end
 
         #set the first individual to the best and save the fitness
         bestfit, bestind = findmax(fitness)
         nextpop[1] = nextpop[bestind]
         bestfits[k] = bestfit
-        pop = deepcopy(nextpop)        
+        pop = deepcopy(nextpop)
     end
 
     return pop[1], bestfits
